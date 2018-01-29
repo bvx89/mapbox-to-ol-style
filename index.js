@@ -244,6 +244,62 @@ function fromTemplate(text, properties) {
   return text;
 }
 
+function getPropertyFromTemplate(text) {
+  var parts = text.match(templateRegEx);
+  return parts && parts[2];
+}
+
+function calculateReferencedPropertiesFromFilter(seenProperties, filterObj) {
+  var type = filterObj[0];
+  var propertyIsFirst = ['==', '!=', '>', '<', '>=', '<=', 'in', '!in', 'has', '!has'];
+  var recurseFilters = ['all', 'any', 'none'];
+  if (propertyIsFirst.indexOf(type) >= 0) {
+    seenProperties[filterObj[1]] = true;
+  } else if (recurseFilters.indexOf(type) >= 0) {
+    for (var i = 1; i < filterObj.length; ++i) {
+      calculateReferencedPropertiesFromFilter(seenProperties, filterObj[i]);
+    }
+  }
+}
+
+function recurseForTemplates(seenProperties, toRecurse) {
+  if (typeof toRecurse === 'string') {
+    var templateUsed = getPropertyFromTemplate(toRecurse);
+    if (templateUsed) {
+      seenProperties[templateUsed] = true;
+    }
+  } else if (Object.prototype.toString.call(toRecurse) === '[object Array]' ) {
+    for (var i = 0; i < toRecurse.length; i++) {
+      recurseForTemplates(seenProperties, toRecurse[i]);
+    }
+  } else if (typeof toRecurse === 'object') {
+    for (var key in toRecurse) {
+      recurseForTemplates(seenProperties, toRecurse[key]);
+    }
+  }
+}
+
+/*
+  Calculates all the properties referenced in the style file
+  */
+function calculateStyleProperties(glStyle) {
+  var seenProperties = {};
+  for (var i = 0; i < glStyle.layers.length; i++) {
+    var layer = glStyle.layers[i];
+    if (layer.filter) {
+      calculateReferencedPropertiesFromFilter(seenProperties, layer.filter);
+    }
+    if (layer.layout) {
+      recurseForTemplates(seenProperties, layer.layout);
+    }
+    if (layer.paint) {
+      recurseForTemplates(seenProperties, layer.paint);
+    }
+  }
+  return seenProperties;
+}
+
+
 /**
  * Creates a style function from the `glStyle` object for all layers that use
  * the specified `source`, which needs to be a `"type": "vector"` or
@@ -338,6 +394,9 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
     return wrappedText;
   }
 
+  var styleProperties = calculateStyleProperties(glStyle);
+  styleProperties['layer'] = true;
+
   var allLayers = glStyle.layers;
   var layersBySourceLayer = {};
   var mapboxLayers = [];
@@ -349,7 +408,7 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
     }
     resolveRef(layer, glStyle);
     if (typeof source == 'string' && layer.source == source ||
-        source.indexOf(layer.id) !== -1) {
+      source.indexOf(layer.id) !== -1) {
       var sourceLayer = layer['source-layer'];
       if (!mapboxSource) {
         mapboxSource = layer.source;
@@ -374,9 +433,14 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
 
   var styles = [];
 
+  var lastZoom = -1;
+  var lastProperties = {};
+  var lastUsedPropertiesCount = 0;
+  var lastType = -1;
+
   var styleFunction = function(feature, resolution) {
     var properties = feature.getProperties();
-    var layers = layersBySourceLayer[properties.layer];
+    var layers = layersBySourceLayer[properties[layerName]];
     if (!layers) {
       return;
     }
@@ -389,13 +453,36 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
       properties: properties,
       type: type
     };
+
+    var isMatch = lastZoom === zoom;
+    isMatch = isMatch && type === lastType;
+    var usedPropertiesCount = 0;
+    for (var property in properties) {
+      // don't bother comparing properties that don't affect styles
+      if (!styleProperties[property]) {
+        continue;
+      }
+      ++usedPropertiesCount;
+      isMatch = isMatch && lastProperties[property] === properties[property];
+    }
+    isMatch = isMatch && lastUsedPropertiesCount === usedPropertiesCount;
+
+    if (isMatch) {
+      return styles;
+    }
+
+    lastProperties = properties;
+    lastUsedPropertiesCount = usedPropertiesCount;
+    lastZoom = zoom;
+    lastType = type;
+
     var stylesLength = -1;
     for (var i = 0, ii = layers.length; i < ii; ++i) {
       var layerData = layers[i];
       var layer = layerData.layer;
       var paint = layer.paint;
       if (paint.visibility === 'none' || ('minzoom' in layer && zoom < layer.minzoom) ||
-          ('maxzoom' in layer && zoom >= layer.maxzoom)) {
+        ('maxzoom' in layer && zoom >= layer.maxzoom)) {
         continue;
       }
       if (!layer.filter || layer.filter(f)) {
@@ -459,9 +546,9 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
             stroke.setColor(color);
             stroke.setWidth(width);
             stroke.setLineDash(paint['line-dasharray'] ?
-                paint['line-dasharray'](zoom, properties).map(function(x) {
-                  return x * width;
-                }) : null);
+              paint['line-dasharray'](zoom, properties).map(function(x) {
+                return x * width;
+              }) : null);
             style.setZIndex(index);
           }
         }
@@ -481,8 +568,8 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
                 if (geom.getFlatMidpoint) {
                   var extent = geom.getExtent();
                   var size = Math.sqrt(
-                      Math.pow((extent[2] - extent[0]) / resolution, 2),
-                      Math.pow((extent[3] - extent[1]) / resolution, 2));
+                    Math.pow((extent[2] - extent[0]) / resolution, 2),
+                    Math.pow((extent[3] - extent[1]) / resolution, 2));
                   if (size > 150) {
                     //FIXME Do not hard-code a size of 150
                     styleGeom = new Point(geom.getFlatMidpoint());
@@ -651,7 +738,7 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
           text.setOffsetY(textOffset[1] * textSize);
           opacity = paint['text-opacity'](zoom, properties);
           textColor.setColor(
-              colorWithOpacity(paint['text-color'](zoom, properties), opacity));
+            colorWithOpacity(paint['text-color'](zoom, properties), opacity));
           text.setFill(textColor);
           var haloColor = colorWithOpacity(paint['text-halo-color'](zoom, properties), opacity);
           if (haloColor) {
@@ -666,10 +753,8 @@ export default function(olLayer, glStyle, source, resolutions, spriteData, sprit
       }
     }
 
-    if (stylesLength > -1) {
-      styles.length = stylesLength + 1;
-      return styles;
-    }
+    styles.length = stylesLength + 1;
+    return styles;
   };
 
   olLayer.setStyle(styleFunction);
