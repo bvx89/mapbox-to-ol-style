@@ -332,15 +332,21 @@ function calculateStyleProperties(glStyle) {
  * @param {Array<string>} [fonts=undefined] Array of available fonts, using the
  * same font names as the Mapbox Style object. If not provided, the style
  * function will always use the first font from the font array.
+ * @param {string} [layerName='layer'] Name of the property inside the geosjon to
+ * match with
  * @return {ol.style.StyleFunction} Style function for use in
  * `ol.layer.Vector` or `ol.layer.VectorTile`.
  */
-export default function(olLayer, glStyle, source, resolutions, spriteData, spriteImageUrl, fonts) {
+export default function(olLayer, glStyle, source, resolutions, spriteData, spriteImageUrl, fonts, layerName) {
   if (!resolutions) {
     resolutions = [];
     for (var res = 156543.03392804097; resolutions.length < 22; res /= 2) {
       resolutions.push(res);
     }
+  }
+
+  if (!layerName) {
+    layerName = 'layer';
   }
   if (typeof glStyle == 'object') {
     // We do not want to modify the original, so we deep-clone it

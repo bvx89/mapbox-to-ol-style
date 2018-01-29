@@ -67,6 +67,8 @@ the specified `source`, which needs to be a `"type": "vector"` or
 -   `fonts` **[Array](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array)&lt;[string](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String)>** Array of available fonts, using the
     same font names as the Mapbox Style object. If not provided, the style
     function will always use the first font from the font array. (optional, default `undefined`)
+-   `layerName` **[string](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String)** Name of the property inside the geosjon to
+    match with (optional, default `'layer'`)
 
 Returns **ol.style.StyleFunction** Style function for use in
 `ol.layer.Vector` or `ol.layer.VectorTile`.
